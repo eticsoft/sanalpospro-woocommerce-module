@@ -41,7 +41,7 @@ define('SPPRO_PLUGIN_FILE', __FILE__);
 register_activation_hook(__FILE__, 'sppro_activate_plugin');
 add_action('plugins_loaded', 'sppro_setup_gateway_class');
 add_action('plugins_loaded', 'sppro_setup_admin_page');
-add_action('plugins_loaded', 'sppro_check_theme_compatibility');
+add_action('woocommerce_blocks_loaded', 'sppro_register_block_support');
 add_action('wp_footer', 'sppro_add_payment_iframe_script');
 add_action('wp_ajax_sppro_internal_api_request', 'sppro_internal_api_request');
 add_action('wp_ajax_nopriv_sppro_internal_api_request', 'sppro_internal_api_request');
@@ -55,6 +55,25 @@ add_action('admin_enqueue_scripts', 'sppro_enqueue_admin_assets');
 function sppro_enqueue_admin_assets() {
     wp_enqueue_style('sppro-admin-popup', SPPRO_PLUGIN_URL . 'assets/css/admin-popup.css', array(), SPPRO_VERSION);
     wp_enqueue_script('sppro-admin-popup', SPPRO_PLUGIN_URL . 'assets/js/admin-popup.js', array('jquery'), SPPRO_VERSION, true);
+}
+
+/**
+ * Register WooCommerce Blocks checkout support
+ */
+function sppro_register_block_support()
+{
+    if (!class_exists('Automattic\\WooCommerce\\Blocks\\Payments\\Integrations\\AbstractPaymentMethodType')) {
+        return;
+    }
+
+    require_once SPPRO_PLUGIN_DIR . 'includes/blocks/class-sppro-blocks-support.php';
+
+    add_action(
+        'woocommerce_blocks_payment_method_type_registration',
+        function (\Automattic\WooCommerce\Blocks\Payments\PaymentMethodRegistry $payment_method_registry) {
+            $payment_method_registry->register(new SPPRO_Blocks_Support());
+        }
+    );
 }
 
 /**
@@ -383,15 +402,19 @@ function sppro_setup_gateway_class()
                 }
 
 
+                $payment_link = $res['data']['payment_link'];
+
                 ob_start();
                 sppro_get_template('checkout/payment-iframe.php', array(
-                    'payment_link' => $res['data']['payment_link']
+                    'payment_link' => $payment_link
                 ));
                 $iframe_html = ob_get_clean();
 
                 return array(
                     'result' => 'success',
                     'messages' => 'Payment link created successfully',
+                    // Important: do NOT send WooCommerce `redirect` here.
+                    // Both Classic and Blocks must open iframe modal first.
                     'iframe_html' => $iframe_html,
                     'redirect_url' => $order_confirmation_url
                 ); 
@@ -659,8 +682,10 @@ function sppro_add_payment_iframe_script()
 {
     if (!is_checkout()) return;
 
+    $script_path = SPPRO_PLUGIN_DIR . 'assets/js/checkout.js';
+    $script_version = file_exists($script_path) ? filemtime($script_path) : SPPRO_VERSION;
 
-    wp_enqueue_script('sppro-checkout-iframe', plugins_url('assets/js/checkout.js', __FILE__), array('jquery'), SPPRO_VERSION, true);
+    wp_enqueue_script('sppro-checkout-iframe', plugins_url('assets/js/checkout.js', __FILE__), array('jquery', 'wc-checkout'), $script_version, true);
 }
 
 /**
